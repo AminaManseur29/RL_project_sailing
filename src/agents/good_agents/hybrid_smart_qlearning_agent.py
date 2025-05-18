@@ -1,5 +1,5 @@
 import numpy as np
-from agents.base_agent import BaseAgent
+from src.agents.base_agent import BaseAgent
 
 ACTIONS = [
     (0, 1), (1, 1), (1, 0), (1, -1),

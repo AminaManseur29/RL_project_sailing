@@ -4,11 +4,11 @@ import numpy as np
 import pandas as pd
 from itertools import product
 
-from env_sailing import SailingEnv
-from initial_windfields import get_initial_windfield
+from src.env_sailing import SailingEnv
+from src.initial_windfields import get_initial_windfield
+from src.utils.agent_utils import save_qlearning_agent
 from src.agents.good_agents.hybrid_smart_qlearning_agent import ExpectedSARSALambdaSmartAgent
 
-# ✅ Autoriser les imports locaux
 sys.path.append(os.path.abspath("src"))
 
 
@@ -33,7 +33,7 @@ epsilons = [0.1, 0.2]
 gamma = 0.99
 num_episodes = 100
 max_steps = 1000
-goal_position = np.array([31, 31])
+goal_position = np.array([17, 31])
 results = []
 
 # 🔁 Grid Search
@@ -93,6 +93,13 @@ for alpha, lambda_, epsilon in product(alphas, lambdas, epsilons):
         "avg_steps": avg_steps,
         "success_rate": success_rate
     })
+
+    # ✅ Sauvegarde de l’agent entraîné dans un fichier Python avec sa Q-table
+    name = f"expected_sarsa_a{int(alpha*100)}_l{int(lambda_*100)}_e{int(epsilon*100)}"
+    save_qlearning_agent(
+        agent=agent,
+        output_path=f"src/agents/{name}_trained.py"
+    )
 
 # 💾 Sauvegarde des résultats
 df_results = pd.DataFrame(results)
