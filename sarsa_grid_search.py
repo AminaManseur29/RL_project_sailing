@@ -1,91 +1,102 @@
+import os
+import sys
 import numpy as np
 import pandas as pd
-import time
-import os
-from src.env_sailing import SailingEnv
-from src.initial_windfields import get_initial_windfield
-from src.agents.my_agents.sarsa_agent import SARSAAgent1
+from itertools import product
 
-# Grilles de recherche
+from env_sailing import SailingEnv
+from initial_windfields import get_initial_windfield
+from src.agents.good_agents.hybrid_smart_qlearning_agent import ExpectedSARSALambdaSmartAgent
+
+# ✅ Autoriser les imports locaux
+sys.path.append(os.path.abspath("src"))
+
+
+# 🎯 Fonction de reward shaping
+def custom_reward(obs, next_obs, reward, done, goal):
+    if done:
+        return reward
+    pos = obs[:2]
+    next_pos = next_obs[:2]
+    move = next_pos - pos
+    goal_vec = goal - pos
+    if np.linalg.norm(move) < 1e-2:
+        return -1
+    progress = np.dot(move, goal_vec) / (np.linalg.norm(move) * np.linalg.norm(goal_vec) + 1e-8)
+    return progress * 2
+
+
+# 🔧 Grille d'hyperparamètres
 alphas = [0.05, 0.1]
-gammas = [0.9, 0.99]
-epsilons = [0.3, 0.9]
-
-# Paramètres d'entraînement
-episode_options = [600]  # tu peux ajouter d'autres longueurs
+lambdas = [0.7, 0.8, 0.9]
+epsilons = [0.1, 0.2]
+gamma = 0.99
+num_episodes = 100
 max_steps = 1000
-epsilon_decay = 0.98
-min_epsilon = 0.05
+goal_position = np.array([31, 31])
+results = []
 
-# Dossier de sortie
-os.makedirs("grid_results", exist_ok=True)
+# 🔁 Grid Search
+for alpha, lambda_, epsilon in product(alphas, lambdas, epsilons):
+    print(f"Training with α={alpha}, λ={lambda_}, ε={epsilon}")
+    env = SailingEnv(**get_initial_windfield("training_1"))
+    agent = ExpectedSARSALambdaSmartAgent(
+        learning_rate=alpha,
+        discount_factor=gamma,
+        exploration_rate=epsilon,
+        lambda_=lambda_,
+    )
+    agent.set_goal(goal_position)
+    agent.seed(42)
+    np.random.seed(42)
 
-for num_episodes in episode_options:
-    results = []
+    total_rewards = []
+    total_steps = []
+    successes = []
 
-    for alpha in alphas:
-        for gamma in gammas:
-            for epsilon in epsilons:
-                print(f"\n🔧 Testing α={alpha}, γ={gamma}, ε={epsilon}, episodes={num_episodes}")
+    for episode in range(num_episodes):
+        obs, _ = env.reset(seed=episode)
+        agent.reset()
+        state = agent.discretize_state(obs)
+        action = agent.act(obs)
+        ep_reward = 0
 
-                agent = SARSAAgent1(
-                    learning_rate=alpha, discount_factor=gamma, exploration_rate=epsilon
-                )
-                agent.seed(42)
-                np.random.seed(42)
+        for step in range(max_steps):
+            next_obs, reward, done, truncated, _ = env.step(action)
+            next_state = agent.discretize_state(next_obs)
+            next_action = agent.act(next_obs)
 
-                env = SailingEnv(**get_initial_windfield("training_1"))
+            shaped_r = custom_reward(obs, next_obs, reward, done, goal_position)
+            agent.learn(state, action, shaped_r, next_state)
 
-                rewards_history = []
-                success_history = []
+            obs = next_obs
+            state = next_state
+            action = next_action
+            ep_reward += reward
 
-                start_time = time.time()
+            if done or truncated:
+                break
 
-                for episode in range(num_episodes):
-                    obs, info = env.reset(seed=episode)
-                    state = agent.discretize_state(obs)
-                    action = agent.act(obs)
-                    total_reward = 0
+        total_rewards.append(ep_reward)
+        total_steps.append(step + 1)
+        successes.append(done)
 
-                    for step in range(max_steps):
-                        next_obs, reward, done, truncated, info = env.step(action)
-                        next_state = agent.discretize_state(next_obs)
-                        next_action = agent.act(next_obs)
+    avg_reward = np.mean(total_rewards)
+    avg_steps = np.mean(total_steps)
+    success_rate = 100 * sum(successes) / len(successes)
 
-                        agent.learn(state, action, reward, next_state, next_action)
+    results.append({
+        "alpha": alpha,
+        "lambda": lambda_,
+        "epsilon": epsilon,
+        "avg_reward": avg_reward,
+        "avg_steps": avg_steps,
+        "success_rate": success_rate
+    })
 
-                        state = next_state
-                        action = next_action
-                        obs = next_obs
-                        total_reward += reward
+# 💾 Sauvegarde des résultats
+df_results = pd.DataFrame(results)
+df_results.to_csv("outputs/grid_search_expected_sarsa.csv", index=False)
 
-                        if done or truncated:
-                            break
-
-                    rewards_history.append(total_reward)
-                    success_history.append(done)
-
-                    agent.exploration_rate = max(
-                        min_epsilon, agent.exploration_rate * epsilon_decay
-                    )
-
-                duration = time.time() - start_time
-                success_rate = sum(success_history) / len(success_history) * 100
-
-                results.append({
-                    "learning_rate": alpha,
-                    "discount_factor": gamma,
-                    "epsilon_start": epsilon,
-                    "epsilon_final": round(agent.exploration_rate, 3),
-                    "episodes": num_episodes,
-                    "avg_reward": np.mean(rewards_history),
-                    "success_rate": success_rate,
-                    "time_sec": round(duration, 2),
-                    "q_table_size": len(agent.q_table)
-                })
-
-    # Sauvegarde CSV
-    df = pd.DataFrame(results)
-    filename = f"grid_results/sarsa_grid_search_{num_episodes}_episodes.csv"
-    df.to_csv(filename, index=False)
-    print(f"\n✅ Résultats sauvegardés dans : {filename}")
+print("\n✅ Grid Search Complete. Résultats enregistrés dans outputs/grid_search_expected_sarsa.csv")
+print(df_results.sort_values(by="success_rate", ascending=False))
