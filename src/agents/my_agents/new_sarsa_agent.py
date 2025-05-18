@@ -1,25 +1,15 @@
-"""
-Expected SARSA Agent for the Sailing Challenge
-
-This file provides a simple agent that always goes north.
-Students can use it as a reference for how to implement a sailing agent.
-"""
-
-
 import numpy as np                # type: ignore
 from agents.base_agent import BaseAgent
 
 
-class ExpectedSARSAAgent(BaseAgent):
-    """ Enhance the Q-Learning Agent + Expected SARSA"""
-    def __init__(self, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1):
+class SARSAAgent1(BaseAgent):
+    """ Enhance the Q-Learning Agent + SARSA with intelligent exploration"""
+    def __init__(self, discount_factor=0.9):
         super().__init__()
         self.np_random = np.random.default_rng()
 
         # Learning parameters
-        self.learning_rate = learning_rate
         self.discount_factor = discount_factor
-        self.exploration_rate = exploration_rate
 
         # State discretization parameters
         self.position_bins = 8     # Discretize the grid into 8x8
@@ -30,6 +20,7 @@ class ExpectedSARSAAgent(BaseAgent):
         # State space: position_x, position_y, velocity_direction, wind_direction
         # Action space: 9 possible actions
         self.q_table = {}
+        self.N = {}
 
     def discretize_state(self, observation):
         """Convert continuous observation to discrete state for Q-table lookup."""
@@ -68,13 +59,25 @@ class ExpectedSARSAAgent(BaseAgent):
         # Return discrete state tuple
         return (x_bin, y_bin, v_bin, wind_bin, avg_wind_dir)
 
+    def should_explore(self, state):
+        # Estime epsilon comme 1 / min(N) pour les actions déjà explorées
+        counts = [self.N.get((state, a), 0) for a in range(9)]
+        nonzero_counts = [c for c in counts if c > 0]
+
+        if not nonzero_counts:
+            return True  # explore à 100% si jamais visité
+
+        min_count = min(nonzero_counts)
+        epsilon_adaptive = 1 / min_count
+        return self.np_random.random() < epsilon_adaptive
+
     def act(self, observation):
         """Choose an action using epsilon-greedy policy."""
         # Discretize the state
         state = self.discretize_state(observation)
 
         # Epsilon-greedy action selection
-        if self.np_random.random() < self.exploration_rate:
+        if self.should_explore(state):
             # Explore: choose a random action
             return self.np_random.integers(0, 9)
         else:
@@ -86,26 +89,22 @@ class ExpectedSARSAAgent(BaseAgent):
             # Return action with highest Q-value
             return np.argmax(self.q_table[state])
 
-    def learn(self, state, action, reward, next_state):
-        """Update Q-table based on observed transition."""
-        # Initialize Q-values if states not in table
+    def learn(self, state, action, reward, next_state, next_action):
         if state not in self.q_table:
             self.q_table[state] = np.zeros(9)
         if next_state not in self.q_table:
             self.q_table[next_state] = np.zeros(9)
 
-        q_next = self.q_table[next_state]
+        if (state, action) not in self.N:
+            self.N[(state, action)] = 0
+        self.N[(state, action)] += 1
 
-        # Expected SARSA
-        best_action = np.argmax(q_next)
-        policy = np.full(9, self.exploration_rate / 9)
-        policy[best_action] += 1.0 - self.exploration_rate
-
-        expected_q = np.sum(policy * q_next)
-
-        td_target = reward + self.discount_factor * expected_q
+        # TD target with SARSA
+        td_target = reward + self.discount_factor * self.q_table[next_state][next_action]
         td_error = td_target - self.q_table[state][action]
-        self.q_table[state][action] += self.learning_rate * td_error
+
+        alpha = 1 / self.N[(state, action)]  # Décroissance dynamique
+        self.q_table[state][action] += alpha * td_error
 
     def reset(self):
         """Reset the agent for a new episode."""
@@ -127,3 +126,4 @@ class ExpectedSARSAAgent(BaseAgent):
         import pickle
         with open(path, 'rb') as f:
             self.q_table = pickle.load(f)
+

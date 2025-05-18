@@ -4,7 +4,7 @@ SARSA Agent for the Sailing Challenge
 
 
 import numpy as np                # type: ignore
-from agents.base_agent import BaseAgent
+from src.agents.base_agent import BaseAgent
 
 
 class SARSAAgent(BaseAgent):
